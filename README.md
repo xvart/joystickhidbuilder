@@ -11,10 +11,10 @@ For this I used an [orangeopi zero](http://http://www.orangepi.org/orangepizero/
 # Tools
 - hidrd
 - usbhid-dump
-- writehex, this is a small c file that includes report.h that I create with the scripts.sh helper
+- writehex, this is a small c file that includes the .h that I create with the scripts.sh helper, the file is auto built each time
 
 # scripts
-- scripts.sh
+- scripts.sh, 
 
 # Important
 When using hidrd work through code and use writehex to create the hex used in the scripts.
