@@ -11,32 +11,42 @@ For this I used an [orangeopi zero](http://http://www.orangepi.org/orangepizero/
 # Tools
 - hidrd
 - usbhid-dump
-- writehex, this is a small c file that includes the .h that I create with the scripts.sh helper, the file is auto built each time
 
 # scripts
-- scripts.sh, 
+- scripts.sh
+. When run with a name ```./scripts d code <name>``` scripts.sh will produce an executable called write<name> that will print the hex needed by the gadget function.
 
 # Important
 When using hidrd work through code and use writehex to create the hex used in the scripts.
 
-The hidrd conversion from XML to code/natv etc will reduce COLLECTION(Physical) 0xA1 0x00 to 0xA0 and "Logical Minimum" (0) 0x15 0x00 to 0x14, while this seems legal it will break Windows and the devices will not work. 
+The hidrd conversion from XML to code/natv etc will reduce COLLECTION(Physical) 0xA1 0x00 to 0xA0 and "Logical Minimum" (0) 0x15 0x00 to 0x14, while this seems legal it will break Windows and the devices will not work.
 
 Linux does not have this issue.
 
+#### Linux issues
+
+ - By default Linux will only allow you to create 4 interfaces so ```/dev/hidg0-3``` to get around this you will need to rebuild the ```usb_f_hid``` module.
+
+ - The line that causes this issue is ```#define HIDG_MINORS     4``` changing the 4 to a greater number will allow that many interfaces to be created.
+
+ Multiple interfaces is a quality of life issue where your subsequent code doesn't need to rely on setting the "Report ID" of each message and should allow the creation of simple pass through filters.
+
+ Essentially ```dd if=/dev/input/js0 of=/dev/hidg1``` should be possible if the data format on each end is the same, but with the mess most HID's are in this will probably never work.
+
 # Workflow
 
-In building this I found it easier to grab some real device HID's convert it to code with hidrd and remix throwing out what made no sense and inserting the extra things I wanted.
+In building this I found it easier to grab some real device HID's convert them to code with hidrd and remix throwing out what made no sense and inserting the extra things I wanted.
 
 To grab a HID I use scripts.sh to simplify my work it boils down to replacing the following,
-- ##### usbhid-dump -m 1d6b:6969 -i 0 | sed '/^.*DESCRIPTOR.*$/d' | hidrd-convert -ihex -o code > report.h
+- ```usbhid-dump -m 1d6b:6969 -i 0 | sed '/^.*DESCRIPTOR.*$/d' | hidrd-convert -ihex -o code > report.h```
 with,
-- ##### ./scripts d code report.h
+- ```./scripts d code report.h```
 and entering the bits needed when asked.
 
 The hidrd "code" output is fully commented so you can just move stuff around as needed without fighting with the details.
 
 #### Dual Gamepad Dump
-A typical report in ```report.h``` produced with ```./scripts d code report.h``` 
+A typical report in ```report.h``` produced with ```./scripts d code report.h```
 ```
 unsigned char report[] = {
 0x05, 0x01, /*  Usage Page (Desktop),           */
@@ -91,6 +101,7 @@ unsigned char report[] = {
 0xC0        /*  End Collection                  */
 };
 ```
+
 
 - The keyboard I had to create from scratch as keyboard HID's are a jumble of strange fragments smashed together.
 - The mouse is a remix of two different mice.

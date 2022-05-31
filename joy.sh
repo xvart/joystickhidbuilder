@@ -2,140 +2,117 @@
 
 set -x
 
-function checkModule(){
-  MODULE="$1"
-  if lsmod | grep "$MODULE" &> /dev/null ; then
-    echo "$MODULE" found.
-    return 0
-  else
-    echo "$MODULE" not found.
-    return 1
-  fi
+# Create gadget
+if [ -n "$1" ]; then
+mkdir /sys/kernel/config/usb_gadget/$1
+cd /sys/kernel/config/usb_gadget/$1
+else
+mkdir /sys/kernel/config/usb_gadget/mykeyboard
+cd /sys/kernel/config/usb_gadget/mykeyboard
+fi
+
+# Add Device Descriptor information
+echo 0x0100 > bcdDevice # Version 1.0.0
+echo 0x0200 > bcdUSB # USB 2.0
+echo 0x00 > bDeviceClass
+echo 0x00 > bDeviceProtocol
+echo 0x00 > bDeviceSubClass
+echo 0x40 > bMaxPacketSize0
+echo 0x6969 > idProduct # Keyboard Joystick Composite Gadget
+echo 0x1d6b > idVendor # Linux Foundation
+
+# Create English locale
+mkdir strings/0x409
+
+echo "Languid" > strings/0x409/manufacturer
+echo "keyboard, joystick, dual gamepad"> strings/0x409/product
+echo "0123456789" > strings/0x409/serialnumber
+
+# Create configuration descriptor
+mkdir configs/c.1
+mkdir configs/c.1/strings/0x409
+
+echo 0x80 > configs/c.1/bmAttributes
+echo 200 > configs/c.1/MaxPower # 200 mA
+# echo 0 > configs/c.1/iConfiguration
+echo "Composite configuration" > configs/c.1/strings/0x409/configuration
+
+# Create HID endpoints
+INDEX=0
+
+# Create keyboard
+keyboard() {
+if [ -z "$3" ]; then
+        echo "Not enough fields in call"
+        exit
+fi
+# Create interface descriptor information
+FN="functions/hid.kb$1"
+mkdir $FN
+echo 1 > $FN/protocol
+echo $2 > $FN/report_length # 9-byte reports
+echo 0 > $FN/subclass
+# Write report descriptor, keyboard 2 parts ID:1,2
+echo $3 | xxd -r -ps > $FN/report_desc
+ln -s $FN configs/c.1
 }
 
-if which 'systemctl' | grep "systemctl" &> /dev/null ; then
- systemctl stop serial-getty@ttyGS0.service >/dev/null
+# Create extreme joystick
+joystick() {
+if [ -z "$3" ]; then
+        echo "Not enough fields in call"
+        exit
 fi
+# Create interface descriptor information
+FN="functions/hid.js$1"
+mkdir $FN
+echo 0 > $FN/protocol
+echo $2 > $FN/report_length # 12-byte reports
+echo 0 > $FN/subclass
+# Write report descriptor, stolen from teensy forum extreme joystick
+# Write 64 bytes to the following endpoint in the same order as listed
+# buttons 64 so 64/8 = 8 bytes
+# axis and sliders 12 for x,y,z,R(x),R(y),R(z),Slider*6 so 12*2 = 24 bytes
+# hats 4 so 4*.5 = 2 bytes
+echo $3 | xxd -r -ps > $FN/report_desc
+ln -s $FN configs/c.1
+}
 
-if checkModule "g_serial" == 0; then
-  modprobe -r g_serial
+# Create dual gamepad, index by "Report ID"
+gamepad() {
+if [ -z "$3" ]; then
+        echo "Not enough fields in call"
+        exit
 fi
+# Create interface descriptor information
+FN="functions/hid.gp$1"
+mkdir $FN
+echo 0 > $FN/protocol
+echo $2 > $FN/report_length # 9-byte reports
+echo 0 > $FN/subclass
+# Format..
+echo $3 | xxd -r -ps > $FN/report_desc
+ln -s $FN configs/c.1
+}
 
-if checkModule "usb_f_acm" == 0; then
-  modprobe -r usb_f_acm
-fi
+# Normal joystick with throttle thing, use 2 for dual joystck plane thing
+JOYHID="05010904A1011500250175019510050919012910810205010901A10016018026FF7F0930093109320933751095038102C0A100150026FF0009360936750895028102C0150025073500463B01750495046514050109390939093909398142C0"
 
-if ! checkModule "g_multi" == 0; then
-  modprobe -r g_multi
-fi
+# The big joystick
+JOYBIG="05010904a1011500250175019540050919012940810205010901a100150027ffff00007510951009300931093209330934093509360936093609360936093609360936093609368102c0150025073500463b01750495046514050109390939093909398142c0"
 
-if ! checkModule "libcomposite" == 0; then
-    modprobe -r libcomposite
-    modprobe libcomposite
-fi
+JOYCOMP="05010904A10185011500250175019510050919012910810205010901A10016018026FF7F0930093109320933751095038102C0A100150026FF0009360936750895028102C0150025073500463B01750495046514050109390939093909398142C005010904A10185021500250175019510050919012910810205010901A10016018026FF7F0930093109320933751095038102C0A100150026FF0009360936750895028102C0150025073500463B01750495046514050109390939093909398142C005010904A10185031500250175019540050919012940810205010901A100150027FFFF00007510951009300931093209330934093509360936093609360936093609360936093609368102C0150025073500463B01750495046514050109390939093909398142C0"
 
-cd /sys/kernel/config/usb_gadget/
+# Link HID function to configuration
+keyboard $INDEX 9 "05010906A10105078501193C29651425017501952A810219672973950D8102750195098101C005010906A1010507850219E029E71425017501950881021904293B14250175019538810205081901290314250175019503910295059101C0"
+INDEX=$(($INDEX + 1))
+joystick $INDEX 42 $JOYCOMP # Joystick
+INDEX=$(($INDEX + 1))
+joystick $INDEX 8 $JOYHID
+INDEX=$(($INDEX + 1))
+# Stolen from some guys tutorial on
+# doing composite report ID thing, microsoft shows both devices
+gamepad $INDEX 9 "05010905A101A100850105091901291015002501951075018102050109300931093209331581257F750895048102C0C005010905A101A100850205091901291015002501951075018102050109300931093209331581257F750895048102C0C0"
 
-if [ -d joystick ]; then
-    echo “” > /config/usb_gadget/g1/UDC #Disable the Gadget
-    rm joystick/configs/c.1/hid.xyz #Unlink Function from Configuration
-    rmdir joystick/configs/c.1/strings/0x409 #Remove Configuration Strings
-    rmdir joystick/configs/c.1/strings
-    rmdir joystick/configs/c.1/ #Remove Configuration
-    rmdir joystick/functions/hid.xyz #Remove Function
-    rmdir joystick/strings/0x409 #Remove Gadget Strings
-    rmdir joystick/strings
-    rmdir joystick #Remove Gadget
-    # umount /config
-fi
-
-mkdir -p joystick
-cd joystick
-echo 0x1d6b > idVendor # Linux Foundation
-echo 0x0104 > idProduct # Multifunction Composite Gadget
-echo 0x0100 > bcdDevice # v1.0.0
-echo 0x0200 > bcdUSB # USB2
-mkdir -p strings/0x409
-echo "1337" > strings/0x409/serialnumber
-echo "languid" > strings/0x409/manufacturer
-echo "Joystick USB Device" > strings/0x409/product
-mkdir -p configs/c.1/strings/0x409
-echo "Config 1: ECM network" > configs/c.1/strings/0x409/configuration
-echo 250 > configs/c.1/MaxPower
-
-# Add functions here
-pwd
-# xyz becayse it's a pointer thing
-mkdir -p functions/hid.xyz
-echo 1 > functions/hid.xyz/protocol
-echo 1 > functions/hid.xyz/subclass
-echo 8 > functions/hid.xyz/report_length
-
-# echo -ne \\x05\\x01\\x09\\x04\\xA1\\x01\\x15\\x00\\x25\\x01\\x75\\x01\\x95\\x20\\x05\\x09\\x19\\x01\\x29\\x20\\x81\\x02\\x15\\x00\\x25\\x07\\x35\\x00\\x46\\x3B\\x01\\x75\\x04\\x95\\x04\\x65\\x14\\x05\\x01\\x09\\x39\\x09\\x39\\x09\\x39\\x09\\x39\\x81\\x42\\x05\\x01\\x09\\x01\\xA1\\x00\\x15\\x00\\x27\\xFF\\xFF\\x00\\x00\\x75\\x10\\x95\\x08\\x09\\x30\\x09\\x31\\x09\\x32\\x09\\x33\\x09\\x34\\x09\\x35\\x09\\x36\\x09\\x36\\x81\\x02\\xC0\\xC0 > functions/hid.xyz/report_desc
-# hidrd-convert -i xml /home/marian/joyhid.xml -o natv /sys/kernel/config/usb_gadget/joystick/functions/hid.xyz/report_desc
-
-cat <<EOF | hidrd-convert -i xml -o natv > /sys/kernel/config/usb_gadget/joystick/functions/hid.xyz/report_desc
-<?xml version="1.0"?>
-<descriptor xmlns="http://digimend.sourceforge.net" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://digimend.sourceforge.net hidrd.xsd">
-<usage_page>desktop<!-- Generic desktop controls (01h) --></usage_page>
-<usage>desktop_joystick<!-- Joystik (04h, application collection) --></usage>
-<COLLECTION type="application">
-<logical_minimum>0</logical_minimum>
-<logical_maximum>1</logical_maximum>
-<report_size>1</report_size>
-<report_count>64</report_count>
-<usage_page>button<!-- Button (09h) --></usage_page>
-<usage_minimum>01</usage_minimum>
-<usage_maximum>40</usage_maximum>
-<input>
-<variable/>
-</input>
-<logical_minimum>0</logical_minimum>
-<logical_maximum>7</logical_maximum>
-<physical_minimum>0</physical_minimum>
-<physical_maximum>315</physical_maximum>
-<report_size>4</report_size>
-<report_count>4</report_count>
-<unit>
-<english_rotation>
-<degrees/>
-</english_rotation>
-</unit>
-<usage_page>desktop<!-- Generic desktop controls (01h) --></usage_page>
-<usage>desktop_hat_switch<!-- Hat switch (39h, dynamic value) --></usage>
-<usage>desktop_hat_switch<!-- Hat switch (39h, dynamic value) --></usage>
-<usage>desktop_hat_switch<!-- Hat switch (39h, dynamic value) --></usage>
-<usage>desktop_hat_switch<!-- Hat switch (39h, dynamic value) --></usage>
-<input>
-<variable/>
-<null_state/>
-</input>
-<usage_page>desktop<!-- Generic desktop controls (01h) --></usage_page>
-<usage>desktop_pointer<!-- Pointer (01h, physical collection) --></usage>
-<COLLECTION type="physical">
-<logical_minimum>0</logical_minimum>
-<logical_maximum>65535</logical_maximum>
-<report_size>16</report_size>
-<report_count>10</report_count>
-<usage>desktop_x<!-- X (30h, dynamic value) --></usage>
-<usage>desktop_y<!-- Y (31h, dynamic value) --></usage>
-<usage>desktop_z<!-- Z (32h, dynamic value) --></usage>
-<usage>desktop_rx<!-- Rx (33h, dynamic value) --></usage>
-<usage>desktop_ry<!-- Ry (34h, dynamic value) --></usage>
-<usage>desktop_rz<!-- Rz (35h, dynamic value) --></usage>
-<usage>desktop_slider<!-- Slider (36h, dynamic value) --></usage>
-<usage>desktop_slider<!-- Slider (36h, dynamic value) --></usage>
-<usage>desktop_slider<!-- Slider (36h, dynamic value) --></usage>
-<usage>desktop_slider<!-- Slider (36h, dynamic value) --></usage>
-<input>
-<variable/>
-</input>
-</COLLECTION>
-</COLLECTION>
-</descriptor>
-EOF
-#hidrd-convert -o natv /sys/kernel/config/usb_gadget/joystick/functions/hid.xyz/report_desc -i xml
-
-ln -s functions/hid.xyz configs/c.1/
-# End functions
+# Enable gadget
 ls /sys/class/udc > UDC
